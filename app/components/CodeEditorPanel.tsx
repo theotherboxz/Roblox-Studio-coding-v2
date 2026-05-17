@@ -5,6 +5,7 @@ import { useAppContext } from '../AppContext';
 import { X, Play, Loader2, Download } from 'lucide-react';
 import { OutputMessage } from '../types';
 
+// ── Fengari loader ────────────────────────────────────────────────────────────
 let fengariLoaded = false;
 let fengariLoading: Promise<void> | null = null;
 
@@ -21,6 +22,7 @@ function loadFengari(): Promise<void> {
   return fengariLoading;
 }
 
+// ── CodeMirror loader ─────────────────────────────────────────────────────────
 let cmLoaded = false;
 let cmLoading: Promise<void> | null = null;
 
@@ -28,16 +30,19 @@ function loadCodeMirror(): Promise<void> {
   if (cmLoaded) return Promise.resolve();
   if (cmLoading) return cmLoading;
   cmLoading = new Promise((resolve, reject) => {
+    // Base CSS
     const css = document.createElement('link');
     css.rel = 'stylesheet';
     css.href = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css';
     document.head.appendChild(css);
 
+    // Monokai theme
     const theme = document.createElement('link');
     theme.rel = 'stylesheet';
     theme.href = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/monokai.min.css';
     document.head.appendChild(theme);
 
+    // Custom overrides
     const style = document.createElement('style');
     style.textContent = `
       .CodeMirror { height: 100% !important; font-size: 12px; font-family: 'Consolas','Monaco',monospace; background:#1b1b1b !important; }
@@ -50,9 +55,11 @@ function loadCodeMirror(): Promise<void> {
     `;
     document.head.appendChild(style);
 
+    // Core JS
     const core = document.createElement('script');
     core.src = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js';
     core.onload = () => {
+      // Lua mode
       const lua = document.createElement('script');
       lua.src = 'https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/lua/lua.min.js';
       lua.onload = () => { cmLoaded = true; resolve(); };
@@ -78,6 +85,7 @@ export function CodeEditorPanel() {
   useEffect(() => { objectsRef.current = ctx.objects; }, [ctx.objects]);
   useEffect(() => { activeIdRef.current = ctx.activeScriptId; }, [ctx.activeScriptId]);
 
+  // ── Init / switch CodeMirror instance when active script changes ──────────
   useEffect(() => {
     if (!ctx.activeScriptId || !editorRef.current) return;
     let cancelled = false;
@@ -87,6 +95,7 @@ export function CodeEditorPanel() {
       const CM = (window as any).CodeMirror;
       if (!CM) return;
 
+      // Destroy old instance
       if (cmRef.current) {
         try { cmRef.current.toTextArea(); } catch (_) {}
         cmRef.current = null;
@@ -122,6 +131,7 @@ export function CodeEditorPanel() {
     return () => { cancelled = true; };
   }, [ctx.activeScriptId]);
 
+  // ── Lua execution via Fengari low-level API ───────────────────────────────
   const executeCode = async () => {
     const activeScript = objectsRef.current.find(o => o.id === activeIdRef.current);
     if (!activeScript || runStage !== 'idle') return;
@@ -148,11 +158,19 @@ export function CodeEditorPanel() {
         source: scriptName, timestamp: Date.now(),
       }]);
 
+      // Use low-level Fengari API for reliable print capture
       const fengariObj = (window as any).fengari;
-      const { lua, lualib, lauxlib, to_luastring } = fengariObj;
+      const { lua, lualib, lauxlib } = fengariObj;
+      const to_luastring = fengariObj.to_luastring ?? ((str: string) => {
+        const bytes = new TextEncoder().encode(str);
+        const result = new Uint8Array(bytes.length + 1);
+        result.set(bytes);
+        return result;
+      });
       const L = lauxlib.luaL_newstate();
       lualib.luaL_openlibs(L);
 
+      // Helper: convert any Lua value at stack index to JS string
       const luaValToStr = (state: any, idx: number): string => {
         lauxlib.luaL_tolstring(state, idx, null);
         const s = lua.lua_tojsstring(state, -1) ?? 'nil';
@@ -160,6 +178,7 @@ export function CodeEditorPanel() {
         return s;
       };
 
+      // Override print
       lua.lua_pushcfunction(L, (state: any) => {
         const n = lua.lua_gettop(state);
         const parts: string[] = [];
@@ -169,6 +188,7 @@ export function CodeEditorPanel() {
       });
       lua.lua_setglobal(L, to_luastring('print'));
 
+      // Override warn
       lua.lua_pushcfunction(L, (state: any) => {
         const n = lua.lua_gettop(state);
         const parts: string[] = [];
@@ -178,11 +198,13 @@ export function CodeEditorPanel() {
       });
       lua.lua_setglobal(L, to_luastring('warn'));
 
+      // Sandbox
       for (const g of ['os', 'io', 'dofile', 'loadfile']) {
         lua.lua_pushnil(L);
         lua.lua_setglobal(L, to_luastring(g));
       }
 
+      // Load and run
       const loadStatus = lauxlib.luaL_loadstring(L, to_luastring(code));
       if (loadStatus !== lua.LUA_OK) {
         throw new Error(lua.lua_tojsstring(L, -1) ?? 'Syntax error');
@@ -238,6 +260,7 @@ export function CodeEditorPanel() {
 
   return (
     <div className="flex-1 bg-[#1b1b1b] flex flex-col h-full overflow-hidden">
+      {/* Tabs */}
       <div className="h-8 bg-[#222222] border-b border-[#333333] flex overflow-x-auto no-scrollbar">
         {openScripts.map(script => (
           <div
@@ -265,6 +288,8 @@ export function CodeEditorPanel() {
           </div>
         )}
       </div>
+
+      {/* CodeMirror mounts here */}
       <div ref={editorRef} className="flex-1 overflow-hidden" />
     </div>
   );
