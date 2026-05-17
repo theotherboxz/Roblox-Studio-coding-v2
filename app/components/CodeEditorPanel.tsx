@@ -159,7 +159,8 @@ export function CodeEditorPanel() {
       }]);
 
       // Use low-level Fengari API for reliable print capture
-      const { lua, lualib, lauxlib } = (window as any).fengari;
+      const fengariObj = (window as any).fengari;
+      const { lua, lualib, lauxlib, to_luastring } = fengariObj;
       const L = lauxlib.luaL_newstate();
       lualib.luaL_openlibs(L);
 
